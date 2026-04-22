@@ -13,3 +13,7 @@ uv sync
 ```
 uv run pytest
 ```
+
+## License
+
+MIT
