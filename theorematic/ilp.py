@@ -24,7 +24,16 @@ from dataclasses import dataclass
 import numpy as np
 import pulp
 
-from theorematic.net import Layer
+from theorematic.net import Layer, evaluate
+
+
+class VerificationError(AssertionError):
+    """Raised when a solver-returned input does not actually produce the target.
+
+    Indicates a bug in the encoding (e.g. an undersized big-M cutting off
+    feasible regions, or an off-by-one in bound propagation) — never a user
+    error. Failing loudly is the point.
+    """
 
 
 @dataclass(frozen=True)
@@ -137,4 +146,21 @@ def invert(
     values = np.array(
         [int(round(_extract(v))) if input_integer else _extract(v) for v in x], dtype=dtype
     )
+
+    # Safety net: a solver "Optimal" result is only meaningful if the input it
+    # returned actually drives the network to the target. Recompute the forward
+    # pass and check non-None target entries. A mismatch means the encoding is
+    # buggy (typically big-M too small) and we want to know immediately.
+    actual = evaluate(layers, values)
+    for j, t in enumerate(target):
+        if t is None:
+            continue
+        if not np.isclose(actual[j], t):
+            raise VerificationError(
+                f"solver returned x={values.tolist()} but evaluate yields "
+                f"output[{j}]={actual[j]} (target={t}). The MILP encoding is "
+                f"inconsistent with the network — most often an undersized "
+                f"big-M or a bound-propagation bug."
+            )
+
     return InvertResult(x=values, status=status)

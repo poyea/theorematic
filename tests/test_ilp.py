@@ -6,9 +6,12 @@ from theorematic.fixtures import (
     block_diagonal_net,
     equality_spike,
     identity_net,
+    n_bit_equality,
+    n_bit_less_than,
+    one_hot_mux,
     xor_net,
 )
-from theorematic.ilp import invert, preact_bounds
+from theorematic.ilp import VerificationError, invert, preact_bounds
 
 
 def test_preact_bounds_xor():
@@ -74,6 +77,85 @@ def test_invert_respects_dont_care():
     r = invert(net, target=[None, 4, None], input_lo=0, input_hi=5)
     assert r.feasible
     assert int(r.x[1]) == 4
+
+
+def test_invert_round_trip_for_all_basic_fixtures():
+    """Every feasible solve must produce an x that evaluates to the target.
+
+    This is the verification safety net at the test level: even if `invert`
+    silently swallowed its internal check one day, this catches it.
+    """
+    cases = [
+        (xor_net(), [1], 0, 1),
+        (xor_net(), [0], 0, 1),
+        (equality_spike(7), [1], 0, 20),
+        (identity_net(3), [4, 0, 2], 0, 5),
+    ]
+    for net, target, lo, hi in cases:
+        r = invert(net, target=target, input_lo=lo, input_hi=hi)
+        assert r.feasible
+        actual = evaluate(net, r.x)
+        for j, t in enumerate(target):
+            assert int(actual[j]) == t, f"target={target}, got {actual.tolist()}"
+
+
+def test_verification_fires_when_target_is_secretly_unreachable(monkeypatch):
+    """If the encoding ever produces an inconsistent solution, raise loudly.
+
+    We simulate this by monkeypatching `evaluate` so the recomputed forward
+    pass disagrees with the solver. The exception path is what's being tested,
+    not the mock.
+    """
+    import theorematic.ilp as ilp_mod
+
+    real_evaluate = ilp_mod.evaluate
+
+    def lying_evaluate(layers, x, **kw):
+        out = real_evaluate(layers, x, **kw)
+        return out + 999  # guaranteed not to match any target
+
+    monkeypatch.setattr(ilp_mod, "evaluate", lying_evaluate)
+    with pytest.raises(VerificationError, match="big-M"):
+        invert(xor_net(), target=[1], input_lo=0, input_hi=1)
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_invert_n_bit_equality_finds_match(n):
+    """Asking for output 1 should yield two halves that are bitwise equal."""
+    r = invert(n_bit_equality(n), target=[1], input_lo=0, input_hi=1)
+    assert r.feasible
+    a_bits = r.x[:n]
+    b_bits = r.x[n:]
+    assert np.array_equal(a_bits, b_bits), f"got a={a_bits}, b={b_bits}"
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_invert_n_bit_less_than_finds_strict_pair(n):
+    r = invert(n_bit_less_than(n), target=[1], input_lo=0, input_hi=1)
+    assert r.feasible
+    a = sum(int(r.x[i]) << i for i in range(n))
+    b = sum(int(r.x[n + i]) << i for i in range(n))
+    assert a < b, f"got a={a}, b={b}"
+
+
+def test_invert_n_bit_less_than_zero_targets_a_geq_b():
+    r = invert(n_bit_less_than(3), target=[0], input_lo=0, input_hi=1)
+    assert r.feasible
+    a = sum(int(r.x[i]) << i for i in range(3))
+    b = sum(int(r.x[3 + i]) << i for i in range(3))
+    assert a >= b
+
+
+def test_invert_one_hot_mux_recovers_a_one_selecting_pair():
+    """Forcing output=1 must produce a config with d[sel_idx] == 1."""
+    k = 4
+    r = invert(one_hot_mux(k), target=[1], input_lo=0, input_hi=1)
+    assert r.feasible
+    data = r.x[:k]
+    sel = r.x[k:]
+    sel_indices = [i for i, s in enumerate(sel) if s == 1]
+    assert len(sel_indices) == 1, f"expected one-hot sel, got {sel.tolist()}"
+    assert data[sel_indices[0]] == 1
 
 
 def test_invert_block_diagonal_is_feasible_for_zero_output():
