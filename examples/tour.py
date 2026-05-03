@@ -17,7 +17,7 @@ import numpy as np
 from theorematic import evaluate
 from theorematic.fixtures import n_bit_less_than
 from theorematic.ilp import invert
-from theorematic.visualize import network_heatmaps, weight_stats
+from theorematic.visualize import activation_flow, network_heatmaps, weight_stats
 
 
 def int_to_bits(value: int, n: int) -> np.ndarray:
@@ -55,6 +55,13 @@ def main() -> None:
             f"  layer {i}: {int(s['shape_out'])}x{int(s['shape_in'])}  "
             f"density={s['density']:.2f}  unique-values={int(s['unique_values'])}"
         )
+
+    # 2b. Activation flow — show which neurons fire for a concrete sample.
+    sample_a, sample_b = 2, 5
+    x_sample = np.concatenate([int_to_bits(sample_a, n), int_to_bits(sample_b, n)])
+    flow_path = out_dir / "activation_flow.png"
+    activation_flow(net, x_sample, path=flow_path)
+    print(f"  activation flow for a={sample_a}, b={sample_b} -> {flow_path.as_posix()}")
 
     # 3. Inversion — ask the MILP solver: find ANY (a, b) bit pattern with a < b.
     print("\n-- inversion (ILP) --")
