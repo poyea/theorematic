@@ -2,41 +2,43 @@
 
 Used as shared test targets across techniques. Every fixture returns a
 `list[Layer]` so it drops straight into `evaluate`.
+
+Built using the primitives in `theorematic.construct`. Fixtures whose value
+is the underlying ReLU-arithmetic *identity* (xor, equality-spike, n-bit
+comparators) are still spelled out densely — the trick is the lesson. Fixtures
+whose value is structural (identity, permutation, block-diagonal) are built
+compositionally to make the structure self-evident.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+from theorematic.construct import linear, parallel, route
 from theorematic.net import Layer
 
 
 def identity_net(n: int) -> list[Layer]:
-    return [Layer(W=np.eye(n, dtype=int), b=np.zeros(n, dtype=int))]
+    return [linear(np.eye(n), np.zeros(n))]
 
 
 def permutation_net(perm: list[int]) -> list[Layer]:
     """Pure permutation: output[i] = input[perm[i]]."""
-    n = len(perm)
-    W = np.zeros((n, n), dtype=int)
-    for i, j in enumerate(perm):
-        W[i, j] = 1
-    return [Layer(W=W, b=np.zeros(n, dtype=int))]
+    return [route(perm, len(perm))]
 
 
 def block_diagonal_net(block_sizes: list[int]) -> list[Layer]:
     """A single layer whose weight matrix has visible block-diagonal structure.
 
     Each block is a dense +1/-1 alternating pattern so the blocks pop visually.
+    Built by composing per-block circuits in parallel — the block-diagonal
+    weight matrix emerges from the composition primitive itself.
     """
-    n = sum(block_sizes)
-    W = np.zeros((n, n), dtype=int)
-    off = 0
+    branches: list[list[Layer]] = []
     for size in block_sizes:
         block = np.fromfunction(lambda i, j: (-1) ** ((i + j).astype(int)), (size, size), dtype=int)
-        W[off : off + size, off : off + size] = block
-        off += size
-    return [Layer(W=W, b=np.zeros(n, dtype=int))]
+        branches.append([linear(block, np.zeros(size))])
+    return parallel(*branches)
 
 
 def xor_net() -> list[Layer]:
@@ -44,9 +46,7 @@ def xor_net() -> list[Layer]:
 
     Input: [a, b] in {0,1}^2. Hidden: [a+b, a+b-1] through ReLU. Output: scalar.
     """
-    l1 = Layer(W=np.array([[1, 1], [1, 1]], dtype=int), b=np.array([0, -1], dtype=int))
-    l2 = Layer(W=np.array([[1, -2]], dtype=int), b=np.array([0], dtype=int))
-    return [l1, l2]
+    return [linear([[1, 1], [1, 1]], [0, -1]), linear([[1, -2]], [0])]
 
 
 def n_bit_equality(n: int) -> list[Layer]:
@@ -77,11 +77,8 @@ def n_bit_equality(n: int) -> list[Layer]:
     for i in range(n):
         W1[0, 2 * i] = -1
         W1[0, 2 * i + 1] = 2
-    b1 = np.array([1], dtype=int)
 
-    W2 = np.array([[1]], dtype=int)
-    b2 = np.array([0], dtype=int)
-    return [Layer(W=W0, b=b0), Layer(W=W1, b=b1), Layer(W=W2, b=b2)]
+    return [linear(W0, b0), linear(W1, [1]), linear([[1]], [0])]
 
 
 def n_bit_less_than(n: int) -> list[Layer]:
@@ -103,14 +100,12 @@ def n_bit_less_than(n: int) -> list[Layer]:
     for i in range(n):
         W0[0, i] = -weights[i]
         W0[0, n + i] = weights[i]
-    b0 = np.array([0], dtype=int)
 
-    W1 = np.array([[1], [1]], dtype=int)
-    b1 = np.array([0, -1], dtype=int)
-
-    W2 = np.array([[1, -1]], dtype=int)
-    b2 = np.array([0], dtype=int)
-    return [Layer(W=W0, b=b0), Layer(W=W1, b=b1), Layer(W=W2, b=b2)]
+    return [
+        linear(W0, [0]),
+        linear([[1], [1]], [0, -1]),
+        linear([[1, -1]], [0]),
+    ]
 
 
 def one_hot_mux(k: int) -> list[Layer]:
@@ -128,11 +123,7 @@ def one_hot_mux(k: int) -> list[Layer]:
     for i in range(k):
         W0[i, i] = 1
         W0[i, k + i] = 1
-    b0 = -np.ones(k, dtype=int)
-
-    W1 = np.ones((1, k), dtype=int)
-    b1 = np.array([0], dtype=int)
-    return [Layer(W=W0, b=b0), Layer(W=W1, b=b1)]
+    return [linear(W0, -np.ones(k)), linear(np.ones((1, k)), [0])]
 
 
 def equality_spike(target: int) -> list[Layer]:
@@ -141,9 +132,7 @@ def equality_spike(target: int) -> list[Layer]:
     EQ(x, v) = ReLU(v - x - 1) - 2*ReLU(v - x) + ReLU(v - x + 1)
     returns 1 iff x == v, else 0. Input is a single scalar.
     """
-    # hidden has three units, each computing ReLU(-x + (v + k)) for k in {-1, 0, +1}
-    W1 = np.array([[-1], [-1], [-1]], dtype=int)
-    b1 = np.array([target - 1, target, target + 1], dtype=int)
-    W2 = np.array([[1, -2, 1]], dtype=int)
-    b2 = np.array([0], dtype=int)
-    return [Layer(W=W1, b=b1), Layer(W=W2, b=b2)]
+    return [
+        linear([[-1], [-1], [-1]], [target - 1, target, target + 1]),
+        linear([[1, -2, 1]], [0]),
+    ]

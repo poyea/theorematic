@@ -1,3 +1,4 @@
+from theorematic.construct import linear, parallel, route, stack
 from theorematic.net import Layer, evaluate, relu
 
-__all__ = ["Layer", "evaluate", "relu"]
+__all__ = ["Layer", "evaluate", "relu", "linear", "route", "stack", "parallel"]
