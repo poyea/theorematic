@@ -135,14 +135,12 @@ def one_hot_mux(k: int) -> list[Layer]:
     return [Layer(W=W0, b=b0), Layer(W=W1, b=b1)]
 
 
-def equality_spike(target: int, width: int = 8) -> list[Layer]:
+def equality_spike(target: int) -> list[Layer]:
     """Scalar equality via the triangle spike.
 
     EQ(x, v) = ReLU(v - x - 1) - 2*ReLU(v - x) + ReLU(v - x + 1)
-    returns 1 iff x == v, else 0. Input is a single scalar. `width` sets the
-    range of x values the circuit is sized for but the formula itself is exact.
+    returns 1 iff x == v, else 0. Input is a single scalar.
     """
-    del width  # kept for symmetry with later multi-byte versions
     # hidden has three units, each computing ReLU(-x + (v + k)) for k in {-1, 0, +1}
     W1 = np.array([[-1], [-1], [-1]], dtype=int)
     b1 = np.array([target - 1, target, target + 1], dtype=int)

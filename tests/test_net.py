@@ -31,3 +31,30 @@ def test_two_layers_compose():
 def test_shape_validation():
     with pytest.raises(ValueError):
         Layer(W=np.zeros((2, 3), dtype=int), b=np.zeros(3, dtype=int))
+
+
+def test_layer_rejects_float_weights():
+    with pytest.raises(TypeError, match="integer dtype"):
+        Layer(W=np.eye(2), b=np.zeros(2, dtype=int))  # W defaults to float64
+
+
+def test_layer_rejects_float_bias():
+    with pytest.raises(TypeError, match="integer dtype"):
+        Layer(W=np.eye(2, dtype=int), b=np.zeros(2))  # b defaults to float64
+
+
+def test_evaluate_rejects_wrong_input_width():
+    layer = Layer(W=np.eye(3, dtype=int), b=np.zeros(3, dtype=int))
+    with pytest.raises(ValueError, match="input width"):
+        evaluate([layer], np.array([1, 2]))
+
+
+def test_evaluate_rejects_non_1d_input():
+    layer = Layer(W=np.eye(3, dtype=int), b=np.zeros(3, dtype=int))
+    with pytest.raises(ValueError, match="1-D"):
+        evaluate([layer], np.array([[1, 2, 3]]))
+
+
+def test_evaluate_rejects_empty_layer_list():
+    with pytest.raises(ValueError, match="non-empty"):
+        evaluate([], np.array([1, 2, 3]))

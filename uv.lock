@@ -519,12 +519,12 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pulp" },
-    { name = "pytest" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "black" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -532,8 +532,10 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pulp", specifier = ">=3.3.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "black", specifier = ">=26.3.1" }]
+dev = [
+    { name = "black", specifier = ">=26.3.1" },
+    { name = "pytest", specifier = ">=9.0.3" },
+]

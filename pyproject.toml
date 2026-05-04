@@ -6,7 +6,6 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.4",
     "pulp>=3.3.0",
-    "pytest>=9.0.3",
 ]
 
 [build-system]
@@ -19,4 +18,9 @@ packages = ["theorematic"]
 [dependency-groups]
 dev = [
     "black>=26.3.1",
+    "pytest>=9.0.3",
 ]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
