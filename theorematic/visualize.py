@@ -116,6 +116,14 @@ def activation_flow(
     Dead neurons (post-ReLU == 0 but pre-activation < 0) are shown in grey;
     active neurons in steelblue; the final layer in a neutral green.
     """
+    if not layers:
+        raise ValueError("layers must be non-empty")
+    if x.ndim != 1:
+        raise ValueError(f"x must be 1-D, got shape {x.shape}")
+    expected = layers[0].in_features
+    if x.shape[0] != expected:
+        raise ValueError(f"input width {x.shape[0]} does not match layer 0 in_features={expected}")
+
     n_layers = len(layers)
     fig, axes = plt.subplots(
         n_layers,

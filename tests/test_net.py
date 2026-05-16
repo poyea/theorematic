@@ -58,3 +58,11 @@ def test_evaluate_rejects_non_1d_input():
 def test_evaluate_rejects_empty_layer_list():
     with pytest.raises(ValueError, match="non-empty"):
         evaluate([], np.array([1, 2, 3]))
+
+
+def test_layer_repr_shows_shapes_not_arrays():
+    layer = Layer(W=np.zeros((3, 5), dtype=int), b=np.zeros(3, dtype=int))
+    r = repr(layer)
+    assert "(3, 5)" in r and "(3,)" in r
+    # the full array dump should not appear
+    assert "[[0" not in r

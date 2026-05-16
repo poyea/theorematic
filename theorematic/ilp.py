@@ -78,6 +78,10 @@ def invert(
     `input_lo` / `input_hi` bound every input coordinate; `input_integer`
     restricts them to integers (the usual case for reverse engineering).
     """
+    if not layers:
+        raise ValueError("layers must be non-empty")
+    if input_lo > input_hi:
+        raise ValueError(f"input_lo ({input_lo}) > input_hi ({input_hi})")
     n_in = layers[0].in_features
     n_out = layers[-1].out_features
     if len(target) != n_out:

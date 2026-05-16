@@ -30,6 +30,13 @@ def test_permutation():
     assert np.array_equal(evaluate(net, x), np.array([30, 10, 20]))
 
 
+def test_permutation_rejects_non_permutation():
+    with pytest.raises(ValueError, match="permutation of"):
+        permutation_net([0, 0, 1])  # duplicate index
+    with pytest.raises(ValueError, match="permutation of"):
+        permutation_net([0, 1, 3])  # missing index 2
+
+
 def test_block_diagonal_shape():
     net = block_diagonal_net([3, 2, 4])
     W = net[0].W

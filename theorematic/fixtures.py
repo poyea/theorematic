@@ -23,8 +23,15 @@ def identity_net(n: int) -> list[Layer]:
 
 
 def permutation_net(perm: list[int]) -> list[Layer]:
-    """Pure permutation: output[i] = input[perm[i]]."""
-    return [route(perm, len(perm))]
+    """Pure permutation: output[i] = input[perm[i]].
+
+    `perm` must be a permutation of `range(len(perm))` — every index appears
+    exactly once. For copies or projections, use `construct.route` directly.
+    """
+    n = len(perm)
+    if sorted(perm) != list(range(n)):
+        raise ValueError(f"perm must be a permutation of range({n}), got {perm}")
+    return [route(perm, n)]
 
 
 def block_diagonal_net(block_sizes: list[int]) -> list[Layer]:

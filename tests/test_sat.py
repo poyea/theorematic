@@ -146,3 +146,8 @@ def test_rejects_target_length_mismatch():
 def test_rejects_empty_layers():
     with pytest.raises(ValueError, match="non-empty"):
         invert([], target=[1], input_lo=0, input_hi=1)
+
+
+def test_rejects_inverted_bounds():
+    with pytest.raises(ValueError, match="input_lo"):
+        invert(xor_net(), target=[1], input_lo=5, input_hi=0)

@@ -72,6 +72,8 @@ def invert(
     """
     if not layers:
         raise ValueError("layers must be non-empty")
+    if input_lo > input_hi:
+        raise ValueError(f"input_lo ({input_lo}) > input_hi ({input_hi})")
     n_out = layers[-1].out_features
     if len(target) != n_out:
         raise ValueError(f"target has {len(target)} entries, net emits {n_out}")

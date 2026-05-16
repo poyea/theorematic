@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
 from theorematic.fixtures import block_diagonal_net, equality_spike, n_bit_less_than, xor_net
 from theorematic.visualize import activation_flow, network_heatmaps, weight_heatmap, weight_stats
@@ -66,6 +67,12 @@ def test_activation_flow_correct_number_of_rows():
     # 2 columns × n_layers rows
     assert len(fig.axes) == 2 * len(net)
     plt.close(fig)
+
+
+def test_activation_flow_rejects_wrong_input_width():
+    net = xor_net()
+    with pytest.raises(ValueError, match="input width"):
+        activation_flow(net, np.array([1, 0, 0]))
 
 
 def test_activation_flow_writes_file(tmp_path):

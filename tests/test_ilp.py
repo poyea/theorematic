@@ -165,3 +165,13 @@ def test_invert_block_diagonal_is_feasible_for_zero_output():
     assert r.feasible
     # verify round trip
     assert np.array_equal(evaluate(net, r.x), np.zeros(5))
+
+
+def test_invert_rejects_empty_layers():
+    with pytest.raises(ValueError, match="non-empty"):
+        invert([], target=[1], input_lo=0, input_hi=1)
+
+
+def test_invert_rejects_inverted_bounds():
+    with pytest.raises(ValueError, match="input_lo"):
+        invert(xor_net(), target=[1], input_lo=5, input_hi=0)
