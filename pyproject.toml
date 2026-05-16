@@ -6,6 +6,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.4",
     "pulp>=3.3.0",
+    "z3-solver>=4.16.0.0",
 ]
 
 [build-system]

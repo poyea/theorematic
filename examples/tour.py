@@ -16,7 +16,8 @@ import numpy as np
 
 from theorematic import evaluate
 from theorematic.fixtures import n_bit_less_than
-from theorematic.ilp import invert
+from theorematic.ilp import invert as invert_ilp
+from theorematic.sat import invert as invert_sat
 from theorematic.visualize import activation_flow, network_heatmaps, weight_stats
 
 
@@ -63,21 +64,21 @@ def main() -> None:
     activation_flow(net, x_sample, path=flow_path)
     print(f"  activation flow for a={sample_a}, b={sample_b} -> {flow_path.as_posix()}")
 
-    # 3. Inversion — ask the MILP solver: find ANY (a, b) bit pattern with a < b.
-    print("\n-- inversion (ILP) --")
-    r = invert(net, target=[1], input_lo=0, input_hi=1)
-    assert r.feasible, f"unexpectedly infeasible: {r.status}"
-    a_recovered = bits_to_int(r.x[:n], n)
-    b_recovered = bits_to_int(r.x[n:], n)
-    print(f"  recovered preimage:  a={a_recovered}, b={b_recovered}  (bits={r.x.tolist()})")
-
-    # 4. Verify — invert() already does this internally, but we make the check
-    # visible here so the round-trip is part of the narrative.
-    out = int(evaluate(net, r.x)[0])
-    print(f"  evaluate(net, x) = {out}")
-    assert out == 1
-    assert a_recovered < b_recovered
-    print("  OK -- preimage verified: a < b and the net outputs 1")
+    # 3. Inversion — ask two solvers the same question and compare.
+    print("\n-- inversion --")
+    for name, invert in (("ILP (pulp/CBC)", invert_ilp), ("SAT (z3)", invert_sat)):
+        r = invert(net, target=[1], input_lo=0, input_hi=1)
+        assert r.feasible, f"{name} unexpectedly infeasible: {r.status}"
+        a_recovered = bits_to_int(r.x[:n], n)
+        b_recovered = bits_to_int(r.x[n:], n)
+        out = int(evaluate(net, r.x)[0])
+        print(
+            f"  {name:<16}  a={a_recovered}, b={b_recovered}  "
+            f"output={out}  (status={r.status})"
+        )
+        assert out == 1
+        assert a_recovered < b_recovered
+    print("  OK -- both solvers returned valid preimages")
 
 
 if __name__ == "__main__":

@@ -24,16 +24,10 @@ from dataclasses import dataclass
 import numpy as np
 import pulp
 
+from theorematic.errors import VerificationError
 from theorematic.net import Layer, evaluate
 
-
-class VerificationError(AssertionError):
-    """Raised when a solver-returned input does not actually produce the target.
-
-    Indicates a bug in the encoding (e.g. an undersized big-M cutting off
-    feasible regions, or an off-by-one in bound propagation) — never a user
-    error. Failing loudly is the point.
-    """
+__all__ = ["InvertResult", "VerificationError", "invert", "preact_bounds"]
 
 
 @dataclass(frozen=True)
