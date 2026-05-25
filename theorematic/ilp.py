@@ -94,8 +94,7 @@ def invert(
     prob = pulp.LpProblem("invert", pulp.LpMinimize)
     cat = "Integer" if input_integer else "Continuous"
     x = [
-        pulp.LpVariable(f"x_{i}", lowBound=input_lo, upBound=input_hi, cat=cat)
-        for i in range(n_in)
+        pulp.LpVariable(f"x_{i}", lowBound=input_lo, upBound=input_hi, cat=cat) for i in range(n_in)
     ]
 
     h: list = list(x)

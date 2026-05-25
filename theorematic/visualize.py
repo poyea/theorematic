@@ -37,14 +37,19 @@ def weight_heatmap(
     fig, axes = plt.subplots(
         1,
         ncols,
-        figsize=(max(3, W.shape[1] * 0.35 + (1.5 if b is not None else 0)), max(3, W.shape[0] * 0.35)),
+        figsize=(
+            max(3, W.shape[1] * 0.35 + (1.5 if b is not None else 0)),
+            max(3, W.shape[0] * 0.35),
+        ),
         gridspec_kw={"width_ratios": width_ratios} if ncols > 1 else None,
     )
     ax_w = axes[0] if ncols > 1 else axes
 
     vmax = float(np.max(np.abs(W))) if symmetric and W.size else 1.0
     vmin = -vmax if symmetric else None
-    im = ax_w.imshow(W, cmap="RdBu_r" if symmetric else "viridis", vmin=vmin, vmax=vmax, aspect="auto")
+    im = ax_w.imshow(
+        W, cmap="RdBu_r" if symmetric else "viridis", vmin=vmin, vmax=vmax, aspect="auto"
+    )
     ax_w.set_xlabel("input")
     ax_w.set_ylabel("output")
     if title:

@@ -73,8 +73,7 @@ def main() -> None:
         b_recovered = bits_to_int(r.x[n:], n)
         out = int(evaluate(net, r.x)[0])
         print(
-            f"  {name:<16}  a={a_recovered}, b={b_recovered}  "
-            f"output={out}  (status={r.status})"
+            f"  {name:<16}  a={a_recovered}, b={b_recovered}  " f"output={out}  (status={r.status})"
         )
         assert out == 1
         assert a_recovered < b_recovered

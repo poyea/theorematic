@@ -15,7 +15,9 @@ class Layer:
     def __post_init__(self) -> None:
         if self.W.ndim != 2 or self.b.ndim != 1 or self.W.shape[0] != self.b.shape[0]:
             raise ValueError(f"shape mismatch: W={self.W.shape}, b={self.b.shape}")
-        if not np.issubdtype(self.W.dtype, np.integer) or not np.issubdtype(self.b.dtype, np.integer):
+        if not np.issubdtype(self.W.dtype, np.integer) or not np.issubdtype(
+            self.b.dtype, np.integer
+        ):
             raise TypeError(
                 f"Layer requires integer dtype: W={self.W.dtype}, b={self.b.dtype}. "
                 f"This project's reverse-engineering techniques assume a discrete weight alphabet."
