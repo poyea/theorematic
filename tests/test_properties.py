@@ -27,9 +27,32 @@ import numpy as np
 import pytest
 
 from theorematic import Layer, evaluate
-from theorematic.features import ALWAYS, NEVER, SOMETIMES, describe_all
+from theorematic.errors import IntegerOverflowError
+from theorematic.features import ALWAYS, NEVER, SOMETIMES, UNKNOWN, describe_all
 from theorematic.net import preact_bounds
 from theorematic.reduce import reduce, reduce_with_bounds
+
+OVERFLOW = "overflow"
+
+
+def outcome(layers: list[Layer], x: np.ndarray):
+    """The forward pass result, or a sentinel when it refuses to run.
+
+    `evaluate` raises rather than wrapping past int64, so "what this net does
+    at x" has three possible answers, not two. Equivalence between two nets
+    means agreeing on which of the three.
+    """
+    try:
+        return evaluate(layers, x)
+    except IntegerOverflowError:
+        return OVERFLOW
+
+
+def same_outcome(a, b) -> bool:
+    if a is OVERFLOW or b is OVERFLOW:
+        return a is b
+    return bool(np.array_equal(a, b))
+
 
 # Weight magnitudes worth generating. 1e9 is the interesting one: two of them
 # multiply to ~1e18, which is the same order as int64's ceiling, so fusion
@@ -137,8 +160,13 @@ def test_bound_driven_reduce_survives_overflow_scale_weights(seed):
     """The regression this file was written for.
 
     Unguarded, weights at 1e9 made ~8% of reductions non-equivalent: fusion
-    multiplies weights past int64 and numpy wraps without a word. Also asserts
-    fusion still fires, so a future guard can't pass this by doing nothing.
+    multiplies weights past int64 and numpy wrapped without a word. `evaluate`
+    now raises instead of wrapping, so the invariant is that both nets agree on
+    *which* outcome they produce, refusal included. A wrapped fused net returns
+    a number where the original refuses, so this still catches the old bug.
+
+    Also asserts fusion still fires, so a future over-cautious guard cannot
+    pass this test by declining to do anything at all.
     """
     fired = 0
     for net, lo, hi, box in generated_cases(seed, 500, LARGE_WEIGHTS):
@@ -146,8 +174,31 @@ def test_bound_driven_reduce_survives_overflow_scale_weights(seed):
         if len(small) != len(net):
             fired += 1
         for x in box:
-            assert np.array_equal(evaluate(small, x), evaluate(net, x)), [l.W.tolist() for l in net]
+            assert same_outcome(outcome(small, x), outcome(net, x)), [l.W.tolist() for l in net]
     assert fired > 20, f"fusion fired only {fired} times; guards may be over-refusing"
+
+
+@pytest.mark.parametrize("seed", [7, 1234])
+def test_feature_verdicts_never_describe_wrapped_arithmetic(seed):
+    """A neuron whose net cannot be evaluated must not get a confident verdict.
+
+    `describe_neuron` decides constants from float64 bounds and everything else
+    by enumerating with `evaluate`. Those two disagree once int64 is exceeded,
+    so the module has to notice and return `"unknown"` rather than describing
+    arithmetic that never happens.
+    """
+    for net, lo, hi, box in generated_cases(seed, 300, LARGE_WEIGHTS):
+        overflows = any(outcome(net, x) is OVERFLOW for x in box)
+        for f in describe_all(net, input_lo=lo, input_hi=hi):
+            if overflows:
+                assert f.verdict == UNKNOWN, (f.layer, f.neuron, f.verdict)
+                continue
+            prefix = net[: f.layer + 1]
+            fires = [bool(evaluate(prefix, x)[f.neuron] > 0) for x in box]
+            if f.verdict == NEVER:
+                assert not any(fires)
+            elif f.verdict == ALWAYS:
+                assert all(fires)
 
 
 # --- what the feature probes promise -----------------------------------------

@@ -3,6 +3,15 @@
 `evaluate` runs a concrete input forward; `preact_bounds` runs an interval
 forward. Both live here because every other module needs at least one of
 them, and siblings must not import from each other.
+
+**On integer overflow.** Every technique in this project reasons about a net's
+arithmetic using something other than a numpy forward pass — interval bounds
+in float64, an LP relaxation, z3's unbounded integers. None of those wrap;
+numpy's int64 does, silently. When that happens the reasoning and the forward
+pass describe two different functions, and results are quietly wrong rather
+than loudly broken. `evaluate` therefore detects overflow and raises
+`IntegerOverflowError`; `bounds_are_exact` lets callers check the matching
+condition on the interval side before trusting a bound.
 """
 
 from __future__ import annotations
@@ -10,6 +19,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+
+from theorematic.errors import IntegerOverflowError
+
+_INT64_MIN = int(np.iinfo(np.int64).min)
+_INT64_MAX = int(np.iinfo(np.int64).max)
+
+# float64 represents integers exactly only to 2**53. Bounds and magnitude
+# estimates above that are approximations, so anything relying on them keeps
+# clear of the int64 boundary rather than trusting arithmetic near it.
+EXACT_FLOAT_INT = 2**53
+_SAFE_PREACT = 2**62
 
 
 @dataclass(frozen=True)
@@ -27,6 +47,15 @@ class Layer:
                 f"Layer requires integer dtype: W={self.W.dtype}, b={self.b.dtype}. "
                 f"This project's reverse-engineering techniques assume a discrete weight alphabet."
             )
+        # Cached for `evaluate`'s overflow check: the largest magnitude this
+        # layer can produce is `_row_reach * max|input| + _bias_reach`. Computed
+        # once here rather than per forward pass, where it measured 5x the cost
+        # of the matmul it guards. Safe to cache because `Layer` is frozen.
+        rows = np.abs(self.W).astype(float).sum(axis=1)
+        object.__setattr__(self, "_row_reach", float(rows.max(initial=0.0)))
+        object.__setattr__(
+            self, "_bias_reach", float(np.abs(self.b).astype(float).max(initial=0.0))
+        )
 
     @property
     def in_features(self) -> int:
@@ -84,8 +113,68 @@ def preact_bounds(
     return out
 
 
+def bounds_are_exact(bounds: list[tuple[np.ndarray, np.ndarray]]) -> bool:
+    """Do these bounds describe the same arithmetic `evaluate` performs?
+
+    `preact_bounds` works in float64, which does not wrap — past `2**53` it
+    merely loses precision and keeps growing. `evaluate` works in int64, which
+    raises rather than wrapping. So a net whose bounds run past this magnitude
+    is one where the two sides stop agreeing: the bounds describe unbounded
+    integer arithmetic and the forward pass refuses to run at all.
+
+    Checked across the *whole* net, because an overflow anywhere invalidates
+    reasoning everywhere in it — including at layers whose own bounds look
+    small. Anything that draws a conclusion from `preact_bounds` should consult
+    this first and decline to conclude when it returns `False`.
+    """
+    return all(
+        bool(np.all(np.abs(z_lo) <= EXACT_FLOAT_INT) and np.all(np.abs(z_hi) <= EXACT_FLOAT_INT))
+        for z_lo, z_hi in bounds
+    )
+
+
+def _cannot_leave_int64(layers: list[Layer], x: np.ndarray) -> bool:
+    """Can this whole forward pass be ruled overflow-free up front?
+
+    Propagates a single scalar magnitude bound: if `|h| <= p` entering a layer
+    then `|Wh + b| <= max_row(sum|W_ij|) * p + max|b|`, and ReLU only shrinks
+    magnitudes, so the bound carries forward. Both weight terms are cached on
+    the layer, making this one integer reduction over `x` plus a couple of
+    float multiplies per layer, independent of layer size.
+
+    `True` means no layer can overflow and the forward pass needs no further
+    checking. `False` means "check each layer exactly", not "overflowed".
+    """
+    peak = float(np.abs(x).max()) if x.size else 0.0
+    for layer in layers:
+        peak = layer._row_reach * peak + layer._bias_reach
+        if peak > _SAFE_PREACT:
+            return False
+    return True
+
+
+def _assert_no_overflow(layer: Layer, h: np.ndarray, index: int) -> None:
+    """Recompute the pre-activation in exact Python integers and check range."""
+    exact = layer.W.astype(object) @ h.astype(object) + layer.b.astype(object)
+    for j, value in enumerate(exact):
+        if not _INT64_MIN <= int(value) <= _INT64_MAX:
+            raise IntegerOverflowError(
+                f"layer {index} neuron {j} pre-activation is {value}, outside int64. "
+                f"numpy would wrap this silently, so every bound, LP relaxation and "
+                f"SMT model built for this net would describe different arithmetic "
+                f"from the forward pass. Use smaller weights or a shallower net."
+            )
+
+
 def evaluate(layers: list[Layer], x: np.ndarray, *, final_relu: bool = False) -> np.ndarray:
-    """Forward pass. Last layer is linear unless `final_relu=True`."""
+    """Forward pass. Last layer is linear unless `final_relu=True`.
+
+    Raises `IntegerOverflowError` rather than wrapping silently. A scalar
+    magnitude bound is propagated once up front; when it clears the int64
+    boundary the loop runs unchecked, so the usual case costs one reduction
+    over `x` and a few float multiplies. Only nets that come near the boundary
+    pay for the exact per-layer recomputation.
+    """
     if not layers:
         raise ValueError("layers must be non-empty")
     if x.ndim != 1:
@@ -93,9 +182,16 @@ def evaluate(layers: list[Layer], x: np.ndarray, *, final_relu: bool = False) ->
     expected = layers[0].in_features
     if x.shape[0] != expected:
         raise ValueError(f"input width {x.shape[0]} does not match layer 0 in_features={expected}")
+
+    # `dtype.kind` rather than `np.issubdtype`: same answer, ~7x cheaper, and
+    # this sits on the hottest path in the project.
+    checked = x.dtype.kind in "iu" and not _cannot_leave_int64(layers, x)
+
     h = x
     last = len(layers) - 1
     for i, layer in enumerate(layers):
+        if checked:
+            _assert_no_overflow(layer, h, i)
         h = layer.W @ h + layer.b
         if final_relu or i != last:
             h = relu(h)

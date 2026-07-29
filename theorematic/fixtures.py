@@ -143,3 +143,44 @@ def equality_spike(target: int) -> list[Layer]:
         linear([[-1], [-1], [-1]], [target - 1, target, target + 1]),
         linear([[1, -2, 1]], [0]),
     ]
+
+
+def absolute_value(n: int = 1) -> list[Layer]:
+    """`|x|` coordinate-wise, the canonical use of ReLU's two-sidedness.
+
+    `|x| = ReLU(x) + ReLU(-x)`. Both halves are needed for exactly the reason
+    ReLU discards information: each branch keeps one sign and the sum
+    reassembles the magnitude.
+
+    Unlike every other fixture here this one is *only* interesting on negative
+    inputs, which is why it exists: it gives the signed regime a shared target
+    the way the bit fixtures do for the binary one.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    positive = np.eye(n, dtype=int)
+    negative = -np.eye(n, dtype=int)
+    return [
+        linear(np.vstack([positive, negative]), np.zeros(2 * n)),
+        linear(np.hstack([positive, positive]), np.zeros(n)),
+    ]
+
+
+def sign_detector(n: int = 1) -> list[Layer]:
+    """1 where `x > 0`, 0 where `x <= 0`, coordinate-wise.
+
+    `sign(x) = ReLU(x) - ReLU(x - 1)` saturates at 1 for every integer `x >= 1`
+    and is 0 for `x <= 0`. Correct only on integers: the staircase argument
+    depends on there being nothing between 0 and 1.
+
+    The other saturating fixtures (`n_bit_less_than`) apply this trick to an
+    already non-negative quantity. Here the input itself is signed, so the
+    negative branch is exercised rather than assumed away.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    identity = np.eye(n, dtype=int)
+    return [
+        linear(np.vstack([identity, identity]), np.concatenate([np.zeros(n), -np.ones(n)])),
+        linear(np.hstack([identity, -identity]), np.zeros(n)),
+    ]

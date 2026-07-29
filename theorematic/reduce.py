@@ -40,41 +40,19 @@ must be small enough that neither its own forward pass nor a fused weight
 product overflows int64. `evaluate` wraps silently on overflow, which would
 make its ReLU decisions disagree with what these bounds describe. Both
 passes detect that regime and become no-ops in it rather than emitting a
-net that is not equivalent. See `_bounds_are_exact`.
+net that is not equivalent. See `net.bounds_are_exact`.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from theorematic.net import Layer, preact_bounds
-
-# float64 represents integers exactly only up to 2**53, and `preact_bounds`
-# works in float64. Past this magnitude a bound is no longer a reliable
-# statement about an integer pre-activation, so the bound-driven passes
-# decline to act on it rather than acting on noise.
-_EXACT_FLOAT_INT = 2**53
+from theorematic.net import Layer, bounds_are_exact, preact_bounds
 
 
 def _require_nonempty(layers: list[Layer]) -> None:
     if not layers:
         raise ValueError("layers must be non-empty")
-
-
-def _bounds_are_exact(bounds: list[tuple[np.ndarray, np.ndarray]]) -> bool:
-    """Are the propagated bounds trustworthy statements about integer preacts?
-
-    Checked across the *whole* net, not per layer. A net whose bounds run past
-    this magnitude is one whose own forward pass can overflow int64, and
-    `evaluate` wraps silently when it does. Its ReLU decisions are then made
-    on wrapped values while these bounds describe the unwrapped ones, so no
-    bound-driven rewrite can be sound anywhere in it — including at layers
-    whose own bounds look small.
-    """
-    return all(
-        bool(np.all(np.abs(z_lo) <= _EXACT_FLOAT_INT) and np.all(np.abs(z_hi) <= _EXACT_FLOAT_INT))
-        for z_lo, z_hi in bounds
-    )
 
 
 def _fits_int64(values: np.ndarray) -> bool:
@@ -162,12 +140,12 @@ def remove_unreachable_neurons(
     with bias <= 0 has `z_hi = b <= 0` under any bounds.
 
     Equivalence holds only inside the declared bounds, and only for nets whose
-    bounds stay in float64's exact-integer range — see `_bounds_are_exact`.
+    bounds stay in float64's exact-integer range — see `net.bounds_are_exact`.
     Outside that range this is a no-op rather than a guess.
     """
     _require_nonempty(layers)
     bounds = preact_bounds(layers, input_lo, input_hi)
-    if not _bounds_are_exact(bounds):
+    if not bounds_are_exact(bounds):
         return list(layers)
     out = list(layers)
     for i in range(len(out) - 1):
@@ -199,7 +177,7 @@ def fuse_linear_layers(
     Two magnitude guards, because fusion *multiplies* weights and so grows
     them far faster than a forward pass does:
 
-    - The net's bounds must be exact in float64 (see `_bounds_are_exact`).
+    - The net's bounds must be exact in float64 (see `net.bounds_are_exact`).
       Past `2**53` a bound is noise, not a proof that the ReLU is identity.
     - The composed weights must fit in int64. The product is computed in
       exact Python integers and the fusion is declined if it would not fit,
@@ -210,7 +188,7 @@ def fuse_linear_layers(
     """
     _require_nonempty(layers)
     bounds = preact_bounds(layers, input_lo, input_hi)
-    if not _bounds_are_exact(bounds):
+    if not bounds_are_exact(bounds):
         return list(layers)
     for i in range(len(layers) - 1):
         if not np.all(bounds[i][0] >= 0):

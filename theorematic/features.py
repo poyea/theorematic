@@ -34,7 +34,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from theorematic.net import Layer, evaluate, preact_bounds
+from theorematic.net import Layer, bounds_are_exact, evaluate, preact_bounds
 
 NEVER = "never"
 ALWAYS = "always"
@@ -158,7 +158,8 @@ def describe_neuron(
         raise ValueError(f"input_lo ({input_lo}) > input_hi ({input_hi})")
 
     support = input_support(layers, layer_index, neuron_index)
-    z_lo, z_hi = preact_bounds(layers, input_lo, input_hi)[layer_index]
+    bounds = preact_bounds(layers, input_lo, input_hi)
+    z_lo, z_hi = bounds[layer_index]
 
     def feature(verdict: str, essential=None, firing=None) -> NeuronFeature:
         return NeuronFeature(
@@ -169,6 +170,13 @@ def describe_neuron(
             essential=essential,
             firing_inputs=firing,
         )
+
+    # The two decision paths below use different arithmetic: bounds in float64,
+    # enumeration via `evaluate` in int64. They agree only while the net stays
+    # inside int64, so past that point neither answer is about the same
+    # function and the only honest verdict is that there isn't one.
+    if not bounds_are_exact(bounds):
+        return feature(UNKNOWN)
 
     if z_hi[neuron_index] <= 0:
         return feature(NEVER, essential=())

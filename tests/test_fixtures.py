@@ -1,8 +1,11 @@
+import itertools
+
 import numpy as np
 import pytest
 
 from theorematic import evaluate
 from theorematic.fixtures import (
+    absolute_value,
     block_diagonal_net,
     equality_spike,
     identity_net,
@@ -10,6 +13,7 @@ from theorematic.fixtures import (
     n_bit_less_than,
     one_hot_mux,
     permutation_net,
+    sign_detector,
     xor_net,
 )
 
@@ -92,3 +96,30 @@ def test_equality_spike(target):
     for x in range(-2, 18):
         out = int(evaluate(net, np.array([x]))[0])
         assert out == (1 if x == target else 0), f"x={x}, target={target}, got {out}"
+
+
+# The signed fixtures. Every fixture above takes non-negative input, so these
+# are the only shared targets that exercise a negative one.
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_absolute_value_exhaustive(n):
+    net = absolute_value(n)
+    for values in itertools.product(range(-4, 5), repeat=n):
+        out = evaluate(net, np.array(values))
+        assert np.array_equal(out, np.abs(np.array(values))), f"n={n}, x={values}, got {out}"
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_sign_detector_exhaustive(n):
+    net = sign_detector(n)
+    for values in itertools.product(range(-4, 5), repeat=n):
+        out = evaluate(net, np.array(values))
+        expected = np.array([1 if v > 0 else 0 for v in values])
+        assert np.array_equal(out, expected), f"n={n}, x={values}, got {out}"
+
+
+def test_signed_fixtures_reject_bad_width():
+    for factory in (absolute_value, sign_detector):
+        with pytest.raises(ValueError, match="n must be >= 1"):
+            factory(0)

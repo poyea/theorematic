@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from theorematic import Layer, evaluate, relu
-from theorematic.net import preact_bounds
+from theorematic.errors import IntegerOverflowError
+from theorematic.net import bounds_are_exact, preact_bounds
 
 
 def test_relu_clips_negatives():
@@ -98,6 +99,53 @@ def test_preact_bounds_rejects_inverted_bounds():
     net = [Layer(W=np.eye(2, dtype=int), b=np.zeros(2, dtype=int))]
     with pytest.raises(ValueError, match="input_lo exceeds input_hi"):
         preact_bounds(net, 1, 0)
+
+
+def test_evaluate_raises_rather_than_wrapping_on_overflow():
+    # 1e10 * 1e10 * 2 is ~2e20, well past int64. numpy would wrap this to a
+    # meaningless (and here, negative) value without complaint.
+    big = 10**10
+    net = [
+        Layer(W=np.array([[big, big]]), b=np.array([0])),
+        Layer(W=np.array([[big]]), b=np.array([0])),
+    ]
+    with pytest.raises(IntegerOverflowError, match="outside int64"):
+        evaluate(net, np.array([1, 1]))
+
+
+def test_overflow_error_names_the_offending_neuron():
+    big = 10**10
+    net = [
+        Layer(W=np.array([[1, 0], [big, big]]), b=np.array([0, 0])),
+        Layer(W=np.array([[0, big]]), b=np.array([0])),
+    ]
+    with pytest.raises(IntegerOverflowError, match=r"layer 1 neuron 0"):
+        evaluate(net, np.array([1, 1]))
+
+
+def test_evaluate_does_not_false_alarm_near_the_boundary():
+    # Comfortably representable, so the guard must stay out of the way. 3e9
+    # squared is ~9e18, just under int64's ceiling.
+    net = [Layer(W=np.array([[3 * 10**9]]), b=np.array([0]))]
+    assert evaluate(net, np.array([3 * 10**9]))[0] == 9 * 10**18
+
+
+def test_evaluate_overflow_check_ignores_float_input():
+    # Floats do not wrap, they lose precision, which is a different problem and
+    # not this check's business.
+    net = [Layer(W=np.array([[10**10]]), b=np.array([0]))]
+    assert evaluate(net, np.array([1e10]))[0] == pytest.approx(1e20)
+
+
+def test_bounds_are_exact_flags_when_float_bounds_stop_being_integers():
+    small = [Layer(W=np.array([[2, 3]]), b=np.array([1]))]
+    assert bounds_are_exact(preact_bounds(small, 0, 1))
+
+    huge = [
+        Layer(W=np.array([[10**9, 10**9]]), b=np.array([0])),
+        Layer(W=np.array([[10**9]]), b=np.array([0])),
+    ]
+    assert not bounds_are_exact(preact_bounds(huge, 0, 1))
 
 
 def test_layer_repr_shows_shapes_not_arrays():
