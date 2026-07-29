@@ -1,13 +1,17 @@
+import itertools
+
 import numpy as np
 import pytest
 
 from theorematic import Layer, evaluate, linear, parallel, stack
 from theorematic.fixtures import (
+    absolute_value,
     equality_spike,
     identity_net,
     n_bit_equality,
     n_bit_less_than,
     one_hot_mux,
+    sign_detector,
     xor_net,
 )
 from theorematic.reduce import (
@@ -344,6 +348,55 @@ def test_bound_driven_passes_decline_when_the_net_can_overflow_int64():
     assert len(reduce_with_bounds(net, 0, 1)) == len(net)
     assert remove_unreachable_neurons(net, 0, 1)[0].W.shape == net[0].W.shape
     assert len(fuse_linear_layers(net, 0, 1)) == len(net)
+
+
+# The signed fixtures pin down what "domain-limited" actually means, because
+# they are the only ones where a mismatched box deletes half the circuit.
+
+SIGNED_FIXTURES = [absolute_value, sign_detector]
+
+
+@pytest.mark.parametrize("factory", SIGNED_FIXTURES)
+@pytest.mark.parametrize("n", [1, 2])
+def test_signed_fixtures_are_tight_under_their_natural_domain(factory, n):
+    net = factory(n)
+    assert len(reduce(net)) == len(net)
+    reduced = reduce_with_bounds(net, -4, 4)
+    assert [l.W.shape for l in reduced] == [l.W.shape for l in net]
+
+
+@pytest.mark.parametrize("factory", SIGNED_FIXTURES)
+@pytest.mark.parametrize("n", [1, 2])
+def test_signed_fixtures_lose_their_negative_branch_under_a_non_negative_box(factory, n):
+    # ReLU(-x) cannot fire when x >= 0, so declaring [0, 1] makes half the
+    # circuit provably dead and it is correctly deleted. Both fixtures are
+    # built as a positive branch plus a negative one, so the survivor is a
+    # single layer.
+    net = factory(n)
+    reduced = reduce_with_bounds(net, 0, 1)
+    assert len(reduced) < len(net)
+    assert reduced[0].out_features < net[0].out_features
+
+
+@pytest.mark.parametrize("factory", SIGNED_FIXTURES)
+@pytest.mark.parametrize("n", [1, 2])
+def test_signed_fixtures_stay_equivalent_inside_the_declared_box(factory, n):
+    net = factory(n)
+    reduced = reduce_with_bounds(net, 0, 1)
+    for values in itertools.product(range(2), repeat=n):
+        x = np.array(values)
+        assert np.array_equal(evaluate(reduced, x), evaluate(net, x))
+
+
+def test_absolute_value_reduced_on_a_non_negative_box_is_no_longer_absolute_value():
+    # The other half of the contract, stated as bluntly as possible: the
+    # reduced net agrees on [0, 1] and is simply a different function outside
+    # it. Nobody should later "fix" this.
+    net = absolute_value(1)
+    reduced = reduce_with_bounds(net, 0, 1)
+    assert evaluate(reduced, np.array([3]))[0] == 3
+    assert evaluate(net, np.array([-3]))[0] == 3
+    assert evaluate(reduced, np.array([-3]))[0] != 3
 
 
 def test_bound_driven_passes_reject_empty():
