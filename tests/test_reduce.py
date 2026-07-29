@@ -308,6 +308,44 @@ def test_bound_driven_passes_survive_a_fully_unreachable_hidden_layer():
             assert np.array_equal(evaluate(collapsed, x), evaluate(net, x))
 
 
+def test_fusion_declines_when_composed_weights_would_overflow():
+    # Fusion multiplies weights, so it grows them far faster than a forward
+    # pass does. These two compose to ~1e20, past int64 — numpy would wrap it
+    # silently and the rewrite would stop preserving evaluate.
+    big = 10**10
+    net = [linear([[big]], [0]), linear([[big]], [0])]
+    assert len(fuse_linear_layers(net, 0, 1)) == 2
+
+
+def test_fusion_proceeds_when_composed_weights_fit():
+    # Same shape, magnitudes that stay in range: fusion must still happen, so
+    # the guard above is a magnitude check and not a blanket refusal.
+    net = [linear([[10**4]], [0]), linear([[10**4]], [0])]
+    fused = fuse_linear_layers(net, 0, 1)
+    assert len(fused) == 1
+    assert fused[0].W[0, 0] == 10**8
+    for x_val in (0, 1):
+        x = np.array([x_val])
+        assert np.array_equal(evaluate(fused, x), evaluate(net, x))
+
+
+def test_bound_driven_passes_decline_when_the_net_can_overflow_int64():
+    # A net whose own forward pass overflows makes its ReLU decisions on
+    # wrapped values, while preact_bounds describes the unwrapped ones. No
+    # bound-driven rewrite is sound there, so both passes must stand down --
+    # including at layer 0, whose own bounds still look small.
+    big = 10**9
+    net = [
+        linear([[big, big]], [0]),
+        linear([[big]], [0]),
+        linear([[big]], [0]),
+        linear([[big]], [0]),
+    ]
+    assert len(reduce_with_bounds(net, 0, 1)) == len(net)
+    assert remove_unreachable_neurons(net, 0, 1)[0].W.shape == net[0].W.shape
+    assert len(fuse_linear_layers(net, 0, 1)) == len(net)
+
+
 def test_bound_driven_passes_reject_empty():
     with pytest.raises(ValueError, match="non-empty"):
         reduce_with_bounds([], 0, 1)

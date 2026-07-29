@@ -34,6 +34,13 @@ The equivalence guarantee is point-wise. For `reduce` it holds for every
 legal `x`; for `reduce_with_bounds` it holds for `x` within the declared
 bounds, and outside them the reduced net may differ. Both are asserted
 exhaustively in `tests/test_reduce.py`.
+
+The bound-driven passes carry one further precondition: the net's weights
+must be small enough that neither its own forward pass nor a fused weight
+product overflows int64. `evaluate` wraps silently on overflow, which would
+make its ReLU decisions disagree with what these bounds describe. Both
+passes detect that regime and become no-ops in it rather than emitting a
+net that is not equivalent. See `_bounds_are_exact`.
 """
 
 from __future__ import annotations
@@ -42,10 +49,37 @@ import numpy as np
 
 from theorematic.net import Layer, preact_bounds
 
+# float64 represents integers exactly only up to 2**53, and `preact_bounds`
+# works in float64. Past this magnitude a bound is no longer a reliable
+# statement about an integer pre-activation, so the bound-driven passes
+# decline to act on it rather than acting on noise.
+_EXACT_FLOAT_INT = 2**53
+
 
 def _require_nonempty(layers: list[Layer]) -> None:
     if not layers:
         raise ValueError("layers must be non-empty")
+
+
+def _bounds_are_exact(bounds: list[tuple[np.ndarray, np.ndarray]]) -> bool:
+    """Are the propagated bounds trustworthy statements about integer preacts?
+
+    Checked across the *whole* net, not per layer. A net whose bounds run past
+    this magnitude is one whose own forward pass can overflow int64, and
+    `evaluate` wraps silently when it does. Its ReLU decisions are then made
+    on wrapped values while these bounds describe the unwrapped ones, so no
+    bound-driven rewrite can be sound anywhere in it — including at layers
+    whose own bounds look small.
+    """
+    return all(
+        bool(np.all(np.abs(z_lo) <= _EXACT_FLOAT_INT) and np.all(np.abs(z_hi) <= _EXACT_FLOAT_INT))
+        for z_lo, z_hi in bounds
+    )
+
+
+def _fits_int64(values: np.ndarray) -> bool:
+    info = np.iinfo(np.int64)
+    return bool(np.all(values >= int(info.min)) and np.all(values <= int(info.max)))
 
 
 def remove_dead_neurons(layers: list[Layer]) -> list[Layer]:
@@ -127,10 +161,14 @@ def remove_unreachable_neurons(
     can go. This strictly subsumes `remove_always_zero_neurons`: a zero row
     with bias <= 0 has `z_hi = b <= 0` under any bounds.
 
-    Equivalence holds only inside the declared bounds.
+    Equivalence holds only inside the declared bounds, and only for nets whose
+    bounds stay in float64's exact-integer range — see `_bounds_are_exact`.
+    Outside that range this is a no-op rather than a guess.
     """
     _require_nonempty(layers)
     bounds = preact_bounds(layers, input_lo, input_hi)
+    if not _bounds_are_exact(bounds):
+        return list(layers)
     out = list(layers)
     for i in range(len(out) - 1):
         keep = bounds[i][1] > 0
@@ -158,15 +196,33 @@ def fuse_linear_layers(
     composed layer changes the bounds downstream of it, so the driver
     recomputes and calls again.
 
+    Two magnitude guards, because fusion *multiplies* weights and so grows
+    them far faster than a forward pass does:
+
+    - The net's bounds must be exact in float64 (see `_bounds_are_exact`).
+      Past `2**53` a bound is noise, not a proof that the ReLU is identity.
+    - The composed weights must fit in int64. The product is computed in
+      exact Python integers and the fusion is declined if it would not fit,
+      because `numpy` would wrap it silently and the rewrite would stop
+      preserving `evaluate`.
+
     Equivalence holds only inside the declared bounds.
     """
     _require_nonempty(layers)
     bounds = preact_bounds(layers, input_lo, input_hi)
+    if not _bounds_are_exact(bounds):
+        return list(layers)
     for i in range(len(layers) - 1):
         if not np.all(bounds[i][0] >= 0):
             continue
         cur, nxt = layers[i], layers[i + 1]
-        fused = Layer(W=nxt.W @ cur.W, b=nxt.W @ cur.b + nxt.b)
+        # object dtype gives arbitrary-precision Python ints, so the overflow
+        # check happens before any wraparound can occur.
+        W = nxt.W.astype(object) @ cur.W.astype(object)
+        b = nxt.W.astype(object) @ cur.b.astype(object) + nxt.b.astype(object)
+        if not (_fits_int64(W) and _fits_int64(b)):
+            continue
+        fused = Layer(W=W.astype(np.int64), b=b.astype(np.int64))
         return layers[:i] + [fused] + layers[i + 2 :]
     return list(layers)
 
