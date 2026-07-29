@@ -13,8 +13,9 @@ indicator, any MILP solver can invert the network — find an input that drives
 the output to a chosen value.
 
 Big-M is not a magic constant. Too small → you cut off real solutions. Too
-large → numerically flabby and slow. We propagate interval bounds through
-the network given input bounds and derive a tight M per neuron.
+large → numerically flabby and slow. `net.preact_bounds` propagates interval
+bounds through the network, giving a tight M per neuron. It is re-exported
+here for callers who found it at this address first.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import numpy as np
 import pulp
 
 from theorematic.errors import VerificationError
-from theorematic.net import Layer, evaluate
+from theorematic.net import Layer, evaluate, preact_bounds
 
 __all__ = ["InvertResult", "VerificationError", "invert", "preact_bounds"]
 
@@ -38,29 +39,6 @@ class InvertResult:
     @property
     def feasible(self) -> bool:
         return self.status == "Optimal"
-
-
-def preact_bounds(
-    layers: list[Layer], input_lo: np.ndarray, input_hi: np.ndarray
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Interval-propagate `[lo, hi]` through the net; return per-layer preact bounds.
-
-    After each hidden layer the post-activation bounds are clipped at zero
-    before propagating onward.
-    """
-    lo, hi = input_lo.astype(float), input_hi.astype(float)
-    out: list[tuple[np.ndarray, np.ndarray]] = []
-    last = len(layers) - 1
-    for i, layer in enumerate(layers):
-        W = layer.W.astype(float)
-        b = layer.b.astype(float)
-        Wp, Wn = np.maximum(W, 0), np.minimum(W, 0)
-        z_lo = Wp @ lo + Wn @ hi + b
-        z_hi = Wp @ hi + Wn @ lo + b
-        out.append((z_lo, z_hi))
-        if i != last:
-            lo, hi = np.maximum(z_lo, 0), np.maximum(z_hi, 0)
-    return out
 
 
 def invert(
@@ -87,9 +65,7 @@ def invert(
     if len(target) != n_out:
         raise ValueError(f"target has {len(target)} entries, net emits {n_out}")
 
-    lo_vec = np.full(n_in, input_lo, dtype=float)
-    hi_vec = np.full(n_in, input_hi, dtype=float)
-    bounds = preact_bounds(layers, lo_vec, hi_vec)
+    bounds = preact_bounds(layers, input_lo, input_hi)
 
     prob = pulp.LpProblem("invert", pulp.LpMinimize)
     cat = "Integer" if input_integer else "Continuous"

@@ -1,4 +1,9 @@
-"""Integer-weighted ReLU MLP: the one evaluator used everywhere."""
+"""Integer-weighted ReLU MLP: the one evaluator used everywhere.
+
+`evaluate` runs a concrete input forward; `preact_bounds` runs an interval
+forward. Both live here because every other module needs at least one of
+them, and siblings must not import from each other.
+"""
 
 from __future__ import annotations
 
@@ -40,6 +45,43 @@ class Layer:
 
 def relu(x: np.ndarray) -> np.ndarray:
     return np.maximum(x, 0)
+
+
+def preact_bounds(
+    layers: list[Layer],
+    input_lo: int | np.ndarray,
+    input_hi: int | np.ndarray,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Interval-propagate `[input_lo, input_hi]` through the net.
+
+    Returns one `(z_lo, z_hi)` pair per layer, bounding that layer's
+    pre-activation `Wx + b`. Post-activation bounds are clipped at zero
+    before propagating onward, since the hidden layers are ReLU.
+
+    Scalars broadcast to every input coordinate; arrays give per-coordinate
+    bounds. The result is a sound over-approximation, not a tight range:
+    interval arithmetic ignores correlations between coordinates.
+    """
+    if not layers:
+        raise ValueError("layers must be non-empty")
+    n_in = layers[0].in_features
+    lo = np.broadcast_to(np.asarray(input_lo, dtype=float), (n_in,)).astype(float)
+    hi = np.broadcast_to(np.asarray(input_hi, dtype=float), (n_in,)).astype(float)
+    if np.any(lo > hi):
+        raise ValueError(f"input_lo exceeds input_hi at {np.flatnonzero(lo > hi).tolist()}")
+
+    out: list[tuple[np.ndarray, np.ndarray]] = []
+    last = len(layers) - 1
+    for i, layer in enumerate(layers):
+        W = layer.W.astype(float)
+        b = layer.b.astype(float)
+        Wp, Wn = np.maximum(W, 0), np.minimum(W, 0)
+        z_lo = Wp @ lo + Wn @ hi + b
+        z_hi = Wp @ hi + Wn @ lo + b
+        out.append((z_lo, z_hi))
+        if i != last:
+            lo, hi = np.maximum(z_lo, 0), np.maximum(z_hi, 0)
+    return out
 
 
 def evaluate(layers: list[Layer], x: np.ndarray, *, final_relu: bool = False) -> np.ndarray:

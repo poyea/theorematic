@@ -133,18 +133,15 @@ def cluster_neurons_by_activation(
 
     n_inputs = arr.shape[0]
     last = len(layers) - 1
-    # patterns[(layer, neuron)] = bool vector of length n_inputs
-    patterns: dict[tuple[int, int], np.ndarray] = {}
-    for i in range(last):  # hidden layers only
-        patterns_layer = np.zeros((n_inputs, layers[i].out_features), dtype=bool)
-        for r, x in enumerate(arr):
-            h = _layer_activations(layers, x)[i]
-            patterns_layer[r] = h > 0
-        for k in range(layers[i].out_features):
-            patterns[(i, k)] = patterns_layer[:, k]
+    fired = [np.zeros((n_inputs, layers[i].out_features), dtype=bool) for i in range(last)]
+    for r, x in enumerate(arr):
+        activations = _layer_activations(layers, x)
+        for i in range(last):
+            fired[i][r] = activations[i] > 0
 
     clusters: dict[tuple[int, ...], list[tuple[int, int]]] = {}
-    for key, vec in patterns.items():
-        sig = tuple(bool(v) for v in vec)
-        clusters.setdefault(sig, []).append(key)
+    for i in range(last):
+        for k in range(layers[i].out_features):
+            sig = tuple(bool(v) for v in fired[i][:, k])
+            clusters.setdefault(sig, []).append((i, k))
     return clusters
